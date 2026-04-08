@@ -1,32 +1,161 @@
-// 민팅 실행 (실제 스마트 컨트랙트 연동 로직)
-mintBtn.addEventListener('click', async () => {
-    // 지갑이나 컨트랙트 연결이 안 되어있으면 튕겨냄
-    if (!signer || !contract) {
-        alert('먼저 지갑을 연결해주세요.');
-        return;
-    }
-    
-    const amount = mintAmountInput.value;
-    
-    try {
-        mintBtn.innerText = 'Minting...';
-        mintBtn.disabled = true;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>INNER JUICY Minting</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
+    <style>
+        body { font-family: 'Courier New', Courier, monospace; }
+        .neon-text { text-shadow: 0 0 5px #fff, 0 0 10px #fff; }
+    </style>
+</head>
+<body class="bg-black text-white min-h-screen flex flex-col items-center py-10">
+
+    <div class="w-full max-w-4xl px-4 mb-10">
+        <img src="image_e7ca77.jpg" alt="Inner Juicy Banner" class="w-full h-auto rounded-xl shadow-2xl">
+    </div>
+
+    <div class="w-full max-w-xl bg-gray-900 border border-gray-700 rounded-2xl p-8 shadow-[0_0_20px_rgba(255,255,255,0.1)]">
+        <h1 class="text-4xl font-bold text-center mb-2 neon-text">INNER JUICY</h1>
+        <p class="text-center text-gray-400 mb-8">Total Supply: 3,333 | Team: 120</p>
+
+        <div class="flex justify-between items-center bg-black p-4 rounded-lg mb-8 border border-gray-800">
+            <div>
+                <p id="wallet-address" class="text-sm text-gray-400">Wallet not connected.</p>
+                <p id="eth-balance" class="text-lg font-bold text-green-400 mt-1">0.00 ETH</p>
+            </div>
+            <button id="connect-btn" class="bg-white text-black px-6 py-2 rounded-full font-bold hover:bg-gray-200 transition">
+                Connect Wallet
+            </button>
+        </div>
+
+        <div class="mb-6">
+            <label class="block text-sm text-gray-400 mb-2">Current Minting Phase</label>
+            <select id="phase-select" class="w-full bg-black border border-gray-700 rounded-lg p-3 text-white outline-none">
+                <option value="gtd">1. GTD (Max 2 per wallet)</option>
+                <option value="fcfs">2. FCFS (Max 2 per wallet)</option>
+                <option value="public">3. Public (Max 1 per wallet)</option>
+            </select>
+        </div>
+
+        <div class="flex items-center gap-4 mb-8">
+            <button id="minus-btn" class="w-12 h-12 bg-gray-800 rounded-lg text-xl hover:bg-gray-700">-</button>
+            <input type="number" id="mint-amount" value="1" readonly class="flex-1 h-12 bg-black border border-gray-700 rounded-lg text-center text-xl text-white outline-none">
+            <button id="plus-btn" class="w-12 h-12 bg-gray-800 rounded-lg text-xl hover:bg-gray-700">+</button>
+        </div>
+
+        <button id="mint-btn" class="w-full bg-gradient-to-r from-pink-500 to-orange-500 text-white text-xl font-bold py-4 rounded-xl hover:opacity-90 transition shadow-lg disabled:opacity-50 disabled:cursor-not-allowed">
+            FREE MINT
+        </button>
+        <p class="text-center text-sm text-gray-500 mt-4">*Only Gas Fee applies.</p>
+    </div>
+
+    <script>
+        let provider, signer, userAddress, contract;
         
-        // --- 핵심: 스마트 컨트랙트의 mint 함수 호출 ---
-        // 무료 민팅이므로 value(ETH)는 보내지 않고 수량만 전달합니다.
-        const tx = await contract.mint(amount);
-        
-        // 트랜잭션이 블록체인에 완전히 기록될 때까지 기다림 (로딩 상태)
-        await tx.wait(); 
-        
-        alert(`성공! ${amount}개의 INNER JUICY 민팅이 완료되었습니다!`);
-        updateBalance(); // 가스비 소모 후 잔액 업데이트
-        
-    } catch (error) {
-        console.error("민팅 에러:", error);
-        alert('민팅 중 오류가 발생했습니다. (트랜잭션 거부, 가스비 부족 등)');
-    } finally {
-        mintBtn.innerText = 'FREE MINT';
-        mintBtn.disabled = false;
-    }
-});
+        // --- 🚨 나중에 스마트 컨트랙트를 배포하면 아래 두 줄을 진짜 값으로 교체하세요! ---
+        const contractAddress = "0x여기에_스마트컨트랙트_주소를_넣으세요";
+        const contractABI = [
+            "function mint(uint256 amount) public",
+            "function totalSupply() public view returns (uint256)"
+        ];
+        // ----------------------------------------------------------------------
+
+        const limits = { gtd: 2, fcfs: 2, public: 1 };
+        const connectBtn = document.getElementById('connect-btn');
+        const walletAddressEl = document.getElementById('wallet-address');
+        const ethBalanceEl = document.getElementById('eth-balance');
+        const phaseSelect = document.getElementById('phase-select');
+        const mintAmountInput = document.getElementById('mint-amount');
+        const minusBtn = document.getElementById('minus-btn');
+        const plusBtn = document.getElementById('plus-btn');
+        const mintBtn = document.getElementById('mint-btn');
+
+        async function connectWallet() {
+            if (typeof window.ethereum !== 'undefined') {
+                try {
+                    provider = new ethers.providers.Web3Provider(window.ethereum);
+                    await provider.send("eth_requestAccounts", []);
+                    signer = provider.getSigner();
+                    userAddress = await signer.getAddress();
+                    
+                    contract = new ethers.Contract(contractAddress, contractABI, signer);
+
+                    walletAddressEl.innerText = userAddress.slice(0, 6) + '...' + userAddress.slice(-4);
+                    connectBtn.innerText = 'Connected';
+                    connectBtn.classList.add('bg-green-500', 'text-white', 'border-none');
+                    connectBtn.disabled = true;
+                    updateBalance();
+                } catch (error) {
+                    console.error("User denied account access");
+                }
+            } else {
+                alert('Please install MetaMask!');
+            }
+        }
+
+        async function updateBalance() {
+            if (provider && userAddress) {
+                const balance = await provider.getBalance(userAddress);
+                const ethBalance = ethers.utils.formatEther(balance);
+                ethBalanceEl.innerText = parseFloat(ethBalance).toFixed(4) + ' ETH';
+            }
+        }
+
+        function updateAmount(change) {
+            let currentAmount = parseInt(mintAmountInput.value);
+            const currentPhase = phaseSelect.value;
+            const maxLimit = limits[currentPhase];
+            let newAmount = currentAmount + change;
+            if (newAmount >= 1 && newAmount <= maxLimit) {
+                mintAmountInput.value = newAmount;
+            }
+        }
+
+        phaseSelect.addEventListener('change', () => { mintAmountInput.value = 1; });
+        minusBtn.addEventListener('click', () => updateAmount(-1));
+        plusBtn.addEventListener('click', () => updateAmount(1));
+        connectBtn.addEventListener('click', connectWallet);
+
+        mintBtn.addEventListener('click', async () => {
+            if (!signer) {
+                alert('Please connect your wallet first.');
+                return;
+            }
+            if (contractAddress === "0x여기에_스마트컨트랙트_주소를_넣으세요") {
+                alert('This is a UI test version. Smart contract is not yet connected!');
+                return;
+            }
+            
+            const amount = mintAmountInput.value;
+            
+            try {
+                mintBtn.innerText = 'Minting...';
+                mintBtn.disabled = true;
+                const tx = await contract.mint(amount);
+                await tx.wait(); 
+                alert(`Success! Minted ${amount} INNER JUICY!`);
+                updateBalance();
+            } catch (error) {
+                console.error("Minting Error:", error);
+                alert('Error during minting. (Transaction rejected, insufficient gas, etc.)');
+            } finally {
+                mintBtn.innerText = 'FREE MINT';
+                mintBtn.disabled = false;
+            }
+        });
+
+        if (window.ethereum) {
+            window.ethereum.on('accountsChanged', (accounts) => {
+                if (accounts.length > 0) {
+                    connectWallet();
+                } else {
+                    window.location.reload();
+                }
+            });
+        }
+    </script>
+</body>
+</html>
