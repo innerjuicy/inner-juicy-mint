@@ -1,0 +1,32 @@
+// 민팅 실행 (실제 스마트 컨트랙트 연동 로직)
+mintBtn.addEventListener('click', async () => {
+    // 지갑이나 컨트랙트 연결이 안 되어있으면 튕겨냄
+    if (!signer || !contract) {
+        alert('먼저 지갑을 연결해주세요.');
+        return;
+    }
+    
+    const amount = mintAmountInput.value;
+    
+    try {
+        mintBtn.innerText = 'Minting...';
+        mintBtn.disabled = true;
+        
+        // --- 핵심: 스마트 컨트랙트의 mint 함수 호출 ---
+        // 무료 민팅이므로 value(ETH)는 보내지 않고 수량만 전달합니다.
+        const tx = await contract.mint(amount);
+        
+        // 트랜잭션이 블록체인에 완전히 기록될 때까지 기다림 (로딩 상태)
+        await tx.wait(); 
+        
+        alert(`성공! ${amount}개의 INNER JUICY 민팅이 완료되었습니다!`);
+        updateBalance(); // 가스비 소모 후 잔액 업데이트
+        
+    } catch (error) {
+        console.error("민팅 에러:", error);
+        alert('민팅 중 오류가 발생했습니다. (트랜잭션 거부, 가스비 부족 등)');
+    } finally {
+        mintBtn.innerText = 'FREE MINT';
+        mintBtn.disabled = false;
+    }
+});
